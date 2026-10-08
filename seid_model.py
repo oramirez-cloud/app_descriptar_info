@@ -298,7 +298,13 @@ def normalize_base64_payload(raw_text: str) -> str:
 
 
 def unwrap_aes_key(private_key, wrapped_key_b64: str) -> tuple[bytes, str]:
-    """Desencripta (RSA) el X-Payload-Key y devuelve (aes_key_bytes, esquema_usado)."""
+    """Desencripta (RSA) el X-Payload-Key y devuelve (aes_key_bytes, esquema_usado).
+
+    El cliente cifra con RSA-OAEP-SHA256 el STRING base64 de la AES key, no los 32 bytes
+    crudos: X-Payload-Key = base64(RSA_OAEP_SHA256(base64_string(aes_key_32_bytes))). Por
+    eso, tras el RSA-decrypt, el resultado es un string base64 de 44 caracteres que hay que
+    volver a decodificar para obtener los 32 bytes reales (ver PayloadEncryptionMiddleware
+    del backend, ResolveSessionKey)."""
     wrapped_key_b64 = normalize_base64_payload(wrapped_key_b64)
     try:
         wrapped = base64.b64decode(wrapped_key_b64, validate=True)
@@ -308,26 +314,43 @@ def unwrap_aes_key(private_key, wrapped_key_b64: str) -> tuple[bytes, str]:
     last_error = None
     for name, padding_factory in RSA_PADDING_SCHEMES:
         try:
-            key_bytes = private_key.decrypt(wrapped, padding_factory())
+            decrypted = private_key.decrypt(wrapped, padding_factory())
         except Exception as exc:
             last_error = exc
             continue
+
+        if len(decrypted) == 32:
+            return decrypted, name
+
+        try:
+            inner_b64 = decrypted.decode("ascii")
+            key_bytes = base64.b64decode(inner_b64, validate=True)
+        except (UnicodeDecodeError, binascii.Error, ValueError) as exc:
+            last_error = ValueError(
+                f"con padding {name} el resultado midio {len(decrypted)} bytes y no es un "
+                f"base64-string valido de una AES key ({type(exc).__name__}: {exc})"
+            )
+            continue
+
         if len(key_bytes) == 32:
-            return key_bytes, name
-        last_error = ValueError(f"con padding {name} el resultado midio {len(key_bytes)} bytes (se esperaban 32)")
+            return key_bytes, f"{name} (doble base64)"
+        last_error = ValueError(
+            f"con padding {name}, tras decodificar el base64-string interno, el resultado "
+            f"midio {len(key_bytes)} bytes (se esperaban 32)"
+        )
 
     raise ValueError(
         "No se pudo desenvolver una AES key de 32 bytes con ningun padding RSA probado "
-        f"(OAEP-SHA256, OAEP-SHA1, PKCS1v15). Verifica que la llave privada sea la correcta. "
-        f"Ultimo error: {last_error}"
+        "(OAEP-SHA256, OAEP-SHA1, PKCS1v15), ni directo ni como base64-string interno. "
+        f"Verifica que la llave privada sea la correcta. Ultimo error: {last_error}"
     )
 
 
 def diagnose_unwrap_failure(private_key, wrapped_key_b64: str) -> str:
     """Arma un reporte linea por linea de por que fallo el unwrap de X-Payload-Key: tamanos,
-    el resultado (exito/excepcion) de cada esquema de padding probado, y un chequeo de bajo
-    nivel (RSA sin padding) para ver si el resultado tiene o no pinta de PKCS1v1.5 valido.
-    Pensado para copiar/pegar el resultado tal cual, no para parsearlo."""
+    y el resultado de cada esquema de padding probado (directo, y tras un segundo
+    base64-decode, porque el cliente cifra el base64-string de la AES key, no los 32 bytes
+    crudos). Pensado para copiar/pegar el resultado tal cual, no para parsearlo."""
     lines = []
     key_size_bytes = private_key.key_size // 8
     lines.append(f"Llave privada: {private_key.key_size} bits ({key_size_bytes} bytes de modulo)")
@@ -347,29 +370,27 @@ def diagnose_unwrap_failure(private_key, wrapped_key_b64: str) -> str:
 
     for name, padding_factory in RSA_PADDING_SCHEMES:
         try:
-            key_bytes = private_key.decrypt(wrapped, padding_factory())
-            lines.append(f"{name}: sin excepcion, resultado de {len(key_bytes)} bytes (se esperaban 32)")
+            decrypted = private_key.decrypt(wrapped, padding_factory())
         except Exception as exc:
             lines.append(f"{name}: fallo ({type(exc).__name__}: {exc})")
+            continue
 
-    if len(wrapped) == key_size_bytes:
+        if len(decrypted) == 32:
+            lines.append(f"{name}: OK directo, 32 bytes (AES key cruda).")
+            continue
+
+        lines.append(f"{name}: sin excepcion, resultado de {len(decrypted)} bytes (no son 32 directo).")
         try:
-            numbers = private_key.private_numbers()
-            c = int.from_bytes(wrapped, "big")
-            m = pow(c, numbers.d, numbers.public_numbers.n)
-            raw = m.to_bytes(key_size_bytes, "big")
-            looks_like_pkcs1 = raw[0] == 0 and raw[1] == 2
-            lines.append(f"RSA sin padding (diagnostico de bajo nivel): primeros 4 bytes = {raw[:4].hex()}")
-            if looks_like_pkcs1:
-                lines.append("-> Tiene estructura de padding PKCS1v1.5 valido (empieza con 00 02).")
-            else:
-                lines.append(
-                    "-> NO tiene estructura de padding RSA valido (deberia empezar con 00 02 y no es "
-                    "asi). Esto confirma que esta llave privada NO es la que cifro este X-Payload-Key "
-                    "puntual (par de llaves distinto, o el X-Payload-Key es de otra request/instancia)."
-                )
-        except Exception as exc:
-            lines.append(f"No se pudo hacer el diagnostico de bajo nivel: {type(exc).__name__}: {exc}")
+            inner_b64 = decrypted.decode("ascii")
+            key_bytes = base64.b64decode(inner_b64, validate=True)
+        except (UnicodeDecodeError, binascii.Error, ValueError) as exc:
+            lines.append(f"  -> no es un base64-string valido ({type(exc).__name__}: {exc}).")
+            continue
+
+        if len(key_bytes) == 32:
+            lines.append(f"  -> SI es un base64-string valido de 32 bytes: {name} + doble base64 = OK.")
+        else:
+            lines.append(f"  -> es base64 valido pero decodifica a {len(key_bytes)} bytes (no 32).")
 
     return "\n".join(lines)
 

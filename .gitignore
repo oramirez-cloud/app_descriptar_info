@@ -1,0 +1,5 @@
+.env
+__pycache__/
+*.pyc
+decrypted_data.sqlite3
+decrypted_data.json

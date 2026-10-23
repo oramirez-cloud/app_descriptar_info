@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Desencriptador data.json (SEID)</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <button id="hamburger-btn" class="hamburger-btn" type="button" aria-label="Abrir menu" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+    <div class="header-text">
+      <h1>Desencriptador data.json</h1>
+      <p>SEID &middot; AES-256-GCM &middot; RSA-OAEP &middot; 100% en el navegador, sin instalar nada</p>
+    </div>
+  </header>
+
+  <div class="app-shell">
+    <aside id="sidebar" class="sidebar">
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-tab="tab-data-json">data.json (legacy)</button>
+        <button class="nav-item" data-tab="tab-api-payload">Payload de API (RSA + AES-GCM)</button>
+      </nav>
+    </aside>
+    <div id="sidebar-overlay" class="sidebar-overlay"></div>
+
+    <main>
+    <!-- ============== TAB 1: data.json legacy ============== -->
+    <section id="tab-data-json" class="tab-panel active">
+      <div class="card">
+        <div class="card-row">
+          <h2>1. JSON de entrada</h2>
+          <button id="load-file-btn" class="btn btn-secondary" type="button">Cargar desde archivo...</button>
+          <input id="load-file-input" type="file" accept="application/json,.json" />
+        </div>
+        <p class="hint">Pega aqui el contenido literal del data.json.</p>
+        <textarea id="json-input" class="mono-area"></textarea>
+      </div>
+
+      <div class="card">
+        <h2>2. Credenciales</h2>
+        <p class="hint">Frase (32 caracteres):</p>
+        <div class="row">
+          <input id="phrase-input" type="password" autocomplete="off" />
+          <label class="switch" style="flex: none;">
+            <input id="show-phrase-toggle" type="checkbox" />
+            <span class="slider"></span>
+          </label>
+          <span style="flex: none; font-size: 13px;">Mostrar</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>3. Opciones de salida</h2>
+        <div class="switch-row">
+          <label class="switch">
+            <input id="export-json-toggle" type="checkbox" />
+            <span class="slider"></span>
+          </label>
+          <span>Descargar tambien como archivo .json en claro (contendra credenciales)</span>
+        </div>
+      </div>
+
+      <button id="decrypt-btn" class="btn btn-primary btn-wide" type="button">Desencriptar</button>
+
+      <div class="card" style="margin-top: 16px;">
+        <h2>Estado</h2>
+        <div id="log-box" class="log-area" style="white-space: pre-wrap;"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-row">
+          <h2>JSON desencriptado</h2>
+          <div class="btn-group">
+            <button id="expand-result-btn" class="btn btn-secondary" type="button">Pantalla completa</button>
+            <button id="copy-result-btn" class="btn btn-secondary" type="button">Copiar</button>
+            <button id="download-result-btn" class="btn btn-secondary" type="button">Descargar .json</button>
+          </div>
+        </div>
+        <textarea id="result-box" class="mono-area" style="min-height: 260px;"></textarea>
+      </div>
+    </section>
+
+    <!-- ============== TAB 2: Payload de API ============== -->
+    <section id="tab-api-payload" class="tab-panel">
+      <p class="hint">
+        Esto desencripta un payload de API distinto al data.json: una AES key por-request va
+        envuelta en RSA-OAEP-SHA256 dentro del header X-Payload-Key (sobre el base64-string de
+        la AES key, no los 32 bytes crudos), y el body viaja como nonce(12)+ciphertext+tag(16)
+        sin length-prefix. Necesitas la llave privada RSA (sacala del JSON ya desencriptado en
+        la otra pestaña).
+      </p>
+
+      <div class="card">
+        <div class="card-row">
+          <h2>1. Llave privada RSA (PEM, PKCS#8)</h2>
+          <button id="autofill-pem-btn" class="btn btn-secondary" type="button">
+            Buscar PEM en el resultado de la otra pestaña
+          </button>
+        </div>
+        <textarea id="pem-input" class="mono-area" style="min-height: 150px;"></textarea>
+      </div>
+
+      <div class="card">
+        <h2>2. X-Payload-Key (header HTTP)</h2>
+        <p class="hint">Base64 — NO es la frase de 32 caracteres.</p>
+        <textarea id="payload-key-input" class="small-area"></textarea>
+      </div>
+
+      <div class="card">
+        <h2>3. Payload cifrado ("encrypted")</h2>
+        <p class="hint">
+          Valor del campo "encrypted" de la respuesta, en base64 — tambien podes pegar el JSON
+          completo tal cual lo copias de las devtools (con + y todo), se normaliza solo.
+        </p>
+        <textarea id="api-payload-input" class="small-area"></textarea>
+      </div>
+
+      <button id="decrypt-payload-btn" class="btn btn-primary btn-wide" type="button">Desencriptar payload</button>
+
+      <div class="card" style="margin-top: 16px;">
+        <div class="card-row">
+          <h2>Resultado</h2>
+          <div class="btn-group">
+            <button id="expand-payload-result-btn" class="btn btn-secondary" type="button">Pantalla completa</button>
+            <button id="copy-payload-result-btn" class="btn btn-secondary" type="button">Copiar</button>
+          </div>
+        </div>
+        <textarea id="payload-result-box" class="mono-area" style="min-height: 200px;"></textarea>
+      </div>
+    </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
